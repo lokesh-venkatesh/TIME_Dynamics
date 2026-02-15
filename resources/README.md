@@ -1,1 +1,0 @@
-This repo shall hold all of my project work for reproducing the Ganguli-Sarkar paper on TIME dynamics and corresponding treatment strategies.

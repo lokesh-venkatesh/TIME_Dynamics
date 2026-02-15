@@ -1,0 +1,19 @@
+Simulation metadata
+==================
+Generated: 2026-02-12T21:40:02.472
+Final time: 100.0
+Number of time points: 1001
+
+Parameters:
+  α = 1.0
+  β = 0.1
+  γ = 0.3
+  δ = 0.01
+
+Initial conditions:
+  x₀ (prey) = 1.0
+  y₀ (predator) = 0.5
+
+Final state:
+  x_final = 291.9447875735021
+  y_final = 29.128861396275205
