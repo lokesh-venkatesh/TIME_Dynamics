@@ -1,0 +1,5 @@
+{
+  "name": "Cancer-Immune-13D-Dynamics",
+  "description": "A modular Julia repository for simulating a 13-dimensional ODE model of cancer-immune interactions, featuring MCMC-DRAM for parameter inference, eFAST for sensitivity analysis, and multi-stage treatment protocol implementations.",
+  "requestFramePermissions": []
+}
