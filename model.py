@@ -1,4 +1,6 @@
 import numpy as np
+from scipy.integrate import solve_ivp
+import pandas as pd
 
 log_eps = 0 # 1e-12
 
@@ -34,7 +36,7 @@ def rhs(t, y, params):
     dS = (gammaS*((1-mS)*(1-p1-p2)))*S - (deltaS+(p2*gammaS)+gammaS*(mS*p1/2))*S - ((muS*S*IFNgamma)/(IFNgamma+k1)) - ((tck*S*TC)/(ktc1+TC))
     dSR = (gammaS*(1-p1-p2) - (deltaS+(p2*gammaS)))*SR + mS*gammaS*(1-p1/2-p2)*S - ((muSR*SR*IFNgamma)/(k2+IFNgamma)) - ((tck*SR*TC)/(ktc2+TC))
     dC = gammaC*(1-mC)*np.log((Cmax+log_eps)/(C+r1+log_eps))*C + gammaS*(p1+p2)*S - deltaC*C - mC*gammaC*C + (muC1*C*IL10)/(IL10+k3) - (muC2*C*IFNgamma)/(IFNgamma+k4) - (tck*C*TC)/(ktc3+TC)
-    dCR = gammaC*CR*np.log((CRmax+log_eps)/(CR+r2+log_eps)) + gammaS*SR*(p1+p2) + mC*gammaC*C - deltaCR*CR + (muC1*CR*IL10)/(IL10+k5) - (muC2*CR*IFNgamma)/(IFNgamma+k6) - (tck*CR*TC)/(ktc4+TC)
+    dCR = gammaCR*CR*np.log((CRmax+log_eps)/(CR+r2+log_eps)) + gammaS*SR*(p1+p2) + mC*gammaCR*C - deltaCR*CR + (muC1*CR*IL10)/(IL10+k5) - (muC2*CR*IFNgamma)/(IFNgamma+k6) - (tck*CR*TC)/(ktc4+TC)
     dM1 = gammaM1*M1*((C+CR)/(M1+lambdaM1)) - deltaM1*M1 + ((muM1Ck2*M1*IFNgamma)/(IFNgamma+k7))
     dM2 = gammaM2*M2*((C+CR)/(M2+lambdaM2)) - deltaM2*M2 + ((muM2Ck1*M2*IL10)/(IL10+k10))
     dTH1 = gammaTh1*((TH1*M1)/(lambdaTh1+TH1)) - deltaTh1*TH1 - ((muTh1Ck1*IL10*TH1)/(IL10+k8)) + ((muTh1Ck3*IL2*TH1)/(IL2+k9))
@@ -46,3 +48,34 @@ def rhs(t, y, params):
     dIL2 = betaTh1CK3*TH1 - deltaCk3*IL2
     
     return np.array([dS, dSR, dC, dCR, dM1, dM2, dTH1, dTH2, dTC, dTreg, dIL10, dIFNgamma, dIL2])
+
+def event_equil(t, y, params): 
+    return np.linalg.norm(y) * 0.01
+
+event_equil.terminal = True # Stop integration when event is triggered
+event_equil.direction = -1 # Only trigger when the function is decreasing (approaching equilibrium)
+
+def run_simulation(initial_conditions, params, t_final='equil', n_points=50000):
+    t_span = [0, 800.0] if t_final == 'equil' else [0, t_final]
+    events = event_equil if t_final == 'equil' else None
+    
+    sol = solve_ivp(rhs, 
+                    t_span, 
+                    initial_conditions, 
+                    args=(params,), 
+                    # method='BDF', rtol=1e-6, atol=1e-8, 
+                    method='BDF', rtol=1e-2, atol=1e-4,  # LESS 'STIFF'
+                    events=events, 
+                    dense_output=True)
+    
+    if not sol.success:
+        raise RuntimeError(f"Solver failed: {sol.message}")
+    
+    t_eval = np.linspace(0, sol.t[-1], n_points)
+    y_eval = sol.sol(t_eval).T
+    
+    state_names = ['S', 'SR', 'C', 'CR', 'M1', 'M2', 'TH1', 'TH2', 'TC', 'Treg', 'IL10', 'IFNgamma', 'IL2']
+    df = pd.DataFrame(y_eval, columns=state_names)
+    df.insert(0, 'time', t_eval)
+    
+    return df
