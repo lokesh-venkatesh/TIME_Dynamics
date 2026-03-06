@@ -4,6 +4,24 @@ import pandas as pd
 
 log_eps = 0 # 1e-12
 
+PARAM_NAMES = { # Map parameter names to indices
+    'betaM2': 0, 'betaTc': 1, 'betaTh1CK2': 2, 'betaTh1CK3': 3, 'betaTh2': 4, 'betaTreg': 5,
+    'gammaC': 6, 'gammaCR': 7, 'gammaM1': 8, 'gammaM2': 9, 'gammaS': 10, 'gammaTc': 11, 'gammaTh1': 12, 'gammaTh2': 13, 'gammaTreg': 14,
+    'deltaC': 15, 'deltaCk1': 16, 'deltaCk2': 17, 'deltaCk3': 18, 'deltaCR': 19, 'deltaM1': 20, 'deltaM2': 21, 'deltaS': 22, 'deltaTc': 23, 'deltaTh1': 24, 'deltaTh2': 25, 'deltaTreg': 26,
+    'lambdaM1': 27, 'lambdaM2': 28, 'lambdaTc1': 29, 'lambdaTc2': 30, 'lambdaTc3': 31, 'lambdaTc4': 32, 'lambdaTh1': 33, 'lambdaTh2': 34, 'lambdaTreg2': 35,
+    'muC1': 36, 'muC2': 37, 'muS': 38, 'muSR': 39, 'muTcS': 40, 'muTcTreg': 41, 'muTh1Ck1': 42, 'muTh1Ck3': 43, 'muTregCk1': 44,
+    'Cmax': 45, 'CRmax': 46,
+    'k1': 47, 'k11': 48, 'k2': 49, 'k3': 50, 'k4': 51, 'k5': 52, 'k6': 53, 'k8': 54, 'k9': 55, 'ktc1': 56, 'ktc2': 57, 'ktc3': 58, 'ktc4': 59,
+    'mC': 60, 'mS': 61, 'p1': 62, 'p2': 63, 'r1': 64, 'r2': 65, 'tck': 66, 'muM1Ck2': 67, 'muM2Ck1': 68, 'k7': 69, 'k10': 70
+}
+
+def get_param_index(param): # Convert parameter name or index to index
+    if isinstance(param, str):
+        if param not in PARAM_NAMES:
+            raise ValueError(f"Unknown parameter: {param}")
+        return PARAM_NAMES[param]
+    return param
+
 def get_params(ranges=None):
     # Default values from file (in exact order used in model.rhs)
     defaults = np.array([
@@ -55,16 +73,17 @@ def event_equil(t, y, params):
 event_equil.terminal = True # Stop integration when event is triggered
 event_equil.direction = -1 # Only trigger when the function is decreasing (approaching equilibrium)
 
-def run_simulation(initial_conditions, params, t_final='equil', n_points=50000):
-    t_span = [0, 800.0] if t_final == 'equil' else [0, t_final]
+def run_simulation(initial_conditions, params, t_final='equil', n_points=100000):
+    t_span = [0, 10000.0] if t_final == 'equil' else [0, t_final]
     events = event_equil if t_final == 'equil' else None
     
     sol = solve_ivp(rhs, 
                     t_span, 
                     initial_conditions, 
                     args=(params,), 
+                    method='BDF', rtol=1e-10, atol=1e-12, 
                     # method='BDF', rtol=1e-6, atol=1e-8, 
-                    method='BDF', rtol=1e-2, atol=1e-4,  # LESS 'STIFF'
+                    # method='BDF', rtol=1e-2, atol=1e-4,  # LESS 'STIFF'
                     events=events, 
                     dense_output=True)
     
