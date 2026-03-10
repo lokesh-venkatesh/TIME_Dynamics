@@ -5,7 +5,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
-from model import get_params, get_default_ic, run_simulation, get_param_index # Import get_param_index
+from model import get_params, get_default_ic, run_simulation, get_param_index 
 
 def run_default(T='equil'):
     params = get_params()

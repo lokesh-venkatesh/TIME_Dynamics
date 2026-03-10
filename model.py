@@ -2,7 +2,7 @@ import numpy as np
 from scipy.integrate import solve_ivp
 import pandas as pd
 
-log_eps = 0 # 1e-12
+log_eps = 0 #1e-12
 
 PARAM_NAMES = { # Map parameter names to indices
     'betaM2': 0, 'betaTc': 1, 'betaTh1CK2': 2, 'betaTh1CK3': 3, 'betaTh2': 4, 'betaTreg': 5,
