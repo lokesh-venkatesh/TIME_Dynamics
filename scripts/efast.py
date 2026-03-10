@@ -13,7 +13,7 @@ from model import get_params, get_default_ic, rhs, PARAM_NAMES
 N_PARAMS = 71
 N_SAMPLES = 10  # samples per search curve
 N_RESAMPLES = 3  # 3 times resampling
-TOTAL_SIMS = (N_PARAMS + 1) * N_SAMPLES * N_RESAMPLES  # 21,600 simulations
+TOTAL_SIMS = (N_PARAMS + 1) * N_SAMPLES * N_RESAMPLES  # 2,160 simulations (not 36,000 like the paper)
 TIME_POINTS = [2, 4, 6, 10, 100, 600]  # days - tumor development stages
 PARAM_LIST = sorted(PARAM_NAMES.keys(), key=lambda x: PARAM_NAMES[x])
 SPECIES_INDICES = {'S': 0, 'SR': 1, 'C': 2, 'CR': 3}
@@ -137,6 +137,8 @@ def compute_variance_indices(Y_base, Y_perturb):
 
 def compute_pvalue(sensitivities):
     """Compute p-value from sensitivity distribution"""
+    sensitivities = np.asarray(sensitivities)  # Convert list to numpy array
+    
     if len(sensitivities) < 2 or np.all(np.isnan(sensitivities)):
         return 1.0
     
@@ -242,6 +244,8 @@ class eFASTAnalyzer:
     
     def compute_pvalue(self, sensitivities):
         """Compute p-value from sensitivity distribution"""
+        sensitivities = np.asarray(sensitivities)  # Convert list to numpy array
+        
         if len(sensitivities) < 2 or np.all(np.isnan(sensitivities)):
             return 1.0
         
