@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.integrate import odeint
+from scipy.integrate import solve_ivp
 import pandas as pd
 
 log_eps = 0
@@ -40,6 +40,28 @@ def get_default_ic():
     return np.array([1, 0, 0, 0, 85000, 15000, 71000, 12000, 56000, 8000, 0.0085, 0.12, 0.0094])
 
 def rhs(t, y, params, u1=0, u2_S=0, u2_C=0, u3_Tc=0, u3_TH1=0):
+    """
+    Right-hand side of the ODE system with optional control variables for treatment.
+    
+    Parameters:
+    -----------
+    t : float
+        Time
+    y : array
+        State vector [S, SR, C, CR, M1, M2, TH1, TH2, TC, Treg, IL10, IFNgamma, IL2]
+    params : array
+        Parameter vector (71 parameters)
+    u1 : float
+        Radiotherapy control variable (default 0)
+    u2_S : float
+        Chemotherapy control variable for stem cells (default 0)
+    u2_C : float
+        Chemotherapy control variable for cancer cells (default 0)
+    u3_Tc : float
+        Immunotherapy control variable for TC cells (default 0)
+    u3_TH1 : float
+        Immunotherapy control variable for TH1 cells (default 0)
+    """
     # Clamp populations to non-negative and finite values
     y = np.maximum(y, 0.0)
     y = np.minimum(y, 1e15)  # Prevent overflow
@@ -54,7 +76,7 @@ def rhs(t, y, params, u1=0, u2_S=0, u2_C=0, u3_Tc=0, u3_TH1=0):
     
     dS = (gammaS*((1-mS)*(1-p1-p2)))*S - (deltaS+(p2*gammaS)+gammaS*(mS*p1/2))*S - ((muS*S*IFNgamma)/(IFNgamma+k1)) - ((tck*S*TC)/(ktc1+TC)) - u2_S*S
     dSR = (gammaS*(1-p1-p2) - (deltaS+(p2*gammaS)))*SR + mS*gammaS*(1-p1/2-p2)*S - ((muSR*SR*IFNgamma)/(k2+IFNgamma)) - ((tck*SR*TC)/(ktc2+TC))
-    dC = gammaC*(1-mC)*log_C*C + gammaS*(p1+p2)*S - deltaC*C - mC*gammaC*C + (muC1*C*IL10)/(IL10+k3) - (muC2*C*IFNgamma)/(IFNgamma+k4) - (tck*C*TC)/(ktc3+TC) - u1*C - u2_C*C
+    dC = gammaC*(1-mC)*log_C*C + gammaS*(p1+p2)*S - deltaC*C - mC*gammaC*C + (muC1*C*IL10)/(IL10+k3) - (muC2*C*IFNgamma)/(IFNgamma+k4) - (tck*C*TC)/(ktc3+TC) - u2_C*C - u1*C
     dCR = gammaCR*CR*log_CR + gammaS*SR*(p1+p2) + mC*gammaCR*C - deltaCR*CR + (muC1*CR*IL10)/(IL10+k5) - (muC2*CR*IFNgamma)/(IFNgamma+k6) - (tck*CR*TC)/(ktc4+TC) - u1*CR
     dM1 = gammaM1*M1*((C+CR)/(M1+lambdaM1)) - deltaM1*M1 + ((muM1Ck2*M1*IFNgamma)/(IFNgamma+k7))
     dM2 = gammaM2*M2*((C+CR)/(M2+lambdaM2)) - deltaM2*M2 + ((muM2Ck1*M2*IL10)/(IL10+k10))
@@ -73,14 +95,44 @@ def rhs(t, y, params, u1=0, u2_S=0, u2_C=0, u3_Tc=0, u3_TH1=0):
     return derivs
 
 def run_simulation(initial_conditions, params, t_final=1000, n_points=1000, u1=0, u2_S=0, u2_C=0, u3_Tc=0, u3_TH1=0):
-    t_eval = np.linspace(0, t_final, n_points)
+    """
+    Run ODE simulation using solve_ivp with BDF method.
     
-    def rhs_wrapper(y, t):
+    Parameters:
+    -----------
+    initial_conditions : array
+        Initial state vector
+    params : array
+        Parameter vector (71 parameters)
+    t_final : float
+        Final time (default 1000)
+    n_points : int
+        Number of output points (default 1000)
+    u1, u2_S, u2_C, u3_Tc, u3_TH1 : float
+        Control variables for treatment (default 0, no treatment)
+    
+    Returns:
+    --------
+    df : DataFrame
+        Solution with columns: time, S, SR, C, CR, M1, M2, TH1, TH2, TC, Treg, IL10, IFNgamma, IL2
+    """
+    t_span = [0, t_final]
+    
+    # Create wrapper function for solve_ivp (which expects rhs(t, y, params, ...))
+    def rhs_with_controls(t, y):
         return rhs(t, y, params, u1, u2_S, u2_C, u3_Tc, u3_TH1)
-
-    # Use balanced tolerances for numerical stability
-    y_eval = odeint(rhs_wrapper, initial_conditions, t_eval, 
-                    rtol=1e-4, atol=1e-6, mxstep=50000, full_output=False)
+    
+    sol = solve_ivp(rhs_with_controls, 
+                    t_span, 
+                    initial_conditions, 
+                    method='BDF', rtol=1e-10, atol=1e-12, 
+                    dense_output=True)
+    
+    if not sol.success:
+        raise RuntimeError(f"Solver failed: {sol.message}")
+    
+    t_eval = np.linspace(0, sol.t[-1], n_points)
+    y_eval = sol.sol(t_eval).T
     
     state_names = ['S', 'SR', 'C', 'CR', 'M1', 'M2', 'TH1', 'TH2', 'TC', 'Treg', 'IL10', 'IFNgamma', 'IL2']
     df = pd.DataFrame(y_eval, columns=state_names)

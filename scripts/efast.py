@@ -7,17 +7,24 @@ from scipy.integrate import odeint
 from scipy import stats
 from multiprocessing import Pool
 import functools
+import pickle
+import json
+from datetime import datetime
 from model import get_params, get_default_ic, rhs, PARAM_NAMES
 
 # Configuration matching paper
 N_PARAMS = 71
-N_SAMPLES = 10  # samples per search curve
-N_RESAMPLES = 3  # 3 times resampling
+N_SAMPLES = 100  # samples per search curve (100)
+N_RESAMPLES = 5  # 3 times resampling (5)
 TOTAL_SIMS = (N_PARAMS + 1) * N_SAMPLES * N_RESAMPLES  # 2,160 simulations (not 36,000 like the paper)
 TIME_POINTS = [2, 4, 6, 10, 100, 600]  # days - tumor development stages
 PARAM_LIST = sorted(PARAM_NAMES.keys(), key=lambda x: PARAM_NAMES[x])
 SPECIES_INDICES = {'S': 0, 'SR': 1, 'C': 2, 'CR': 3}
-N_CORES = 8  # Use 8 out of 12 cores
+N_CORES = 6  # Use 8 out of 12 cores
+
+# Checkpoint configuration
+CHECKPOINT_DIR = 'data/checkpoints'
+CHECKPOINT_INTERVAL = 1  # Save checkpoint after each timepoint
 
 # ============================================================================
 # Standalone worker function for multiprocessing
@@ -368,39 +375,130 @@ class eFASTAnalyzer:
                 print(f"✓ Saved: {filename}")
 
 # ============================================================================
-# Parallelized Analysis Method
+# Parallelized Analysis Method with Checkpointing
 # ============================================================================
 class ParalleleFASTAnalyzer(eFASTAnalyzer):
-    """Extended Fourier Amplitude Sensitivity Test with Parallelization"""
+    """Extended Fourier Amplitude Sensitivity Test with Parallelization and Checkpointing"""
     
-    def run_analysis(self):
-        """Run full sensitivity analysis with parallelization across parameters"""
+    def __init__(self, n_samples=100, n_resamples=5):
+        super().__init__(n_samples, n_resamples)
+        self.omega_set = None
+        self.progress_file = f'{CHECKPOINT_DIR}/progress.json'
+    
+    def load_checkpoint(self):
+        """Load previous progress if available"""
+        os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+        
+        if not os.path.exists(self.progress_file):
+            return None, None
+        
+        try:
+            with open(self.progress_file, 'r') as f:
+                progress = json.load(f)
+            
+            # Load omega_set
+            omega_file = f'{CHECKPOINT_DIR}/omega_set.pkl'
+            if os.path.exists(omega_file):
+                with open(omega_file, 'rb') as f:
+                    omega_set = pickle.load(f)
+            else:
+                omega_set = None
+            
+            # Load analyzer state
+            analyzer_file = f'{CHECKPOINT_DIR}/analyzer_state.pkl'
+            if os.path.exists(analyzer_file):
+                with open(analyzer_file, 'rb') as f:
+                    self.results = pickle.load(f)
+            
+            return progress, omega_set
+        except Exception as e:
+            print(f"⚠ Could not load checkpoint: {e}")
+            return None, None
+    
+    def save_checkpoint(self, progress):
+        """Save current progress"""
+        os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+        
+        try:
+            # Save progress
+            with open(self.progress_file, 'w') as f:
+                json.dump(progress, f, indent=2)
+            
+            # Save omega set
+            with open(f'{CHECKPOINT_DIR}/omega_set.pkl', 'wb') as f:
+                pickle.dump(self.omega_set, f)
+            
+            # Save analyzer state
+            with open(f'{CHECKPOINT_DIR}/analyzer_state.pkl', 'wb') as f:
+                pickle.dump(self.results, f)
+            
+            print(f"  ✓ Checkpoint saved at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        except Exception as e:
+            print(f"  ⚠ Failed to save checkpoint: {e}")
+    
+    def clear_checkpoints(self):
+        """Clear all checkpoint files"""
+        if os.path.exists(CHECKPOINT_DIR):
+            try:
+                for file in os.listdir(CHECKPOINT_DIR):
+                    filepath = os.path.join(CHECKPOINT_DIR, file)
+                    if os.path.isfile(filepath):
+                        os.remove(filepath)
+                print("✓ Checkpoints cleared. Starting fresh analysis.\n")
+            except Exception as e:
+                print(f"⚠ Failed to clear checkpoints: {e}\n")
+    
+    def run_analysis(self, restart=False):
+        """Run full sensitivity analysis with checkpointing"""
+        
         print("\n" + "="*80)
-        print("eFAST PARAMETER SENSITIVITY ANALYSIS (PARALLELIZED)")
+        print("eFAST PARAMETER SENSITIVITY ANALYSIS (PARALLELIZED WITH CHECKPOINTING)")
         print(f"Total simulations: {TOTAL_SIMS:,}")
         print(f"Parameters: {N_PARAMS}, Samples/curve: {N_SAMPLES}, Resamples: {N_RESAMPLES}")
         print(f"Cores used: {N_CORES}")
-        print(f"Timepoints: {TIME_POINTS}")
+        print(f"Checkpoint directory: {CHECKPOINT_DIR}")
         print("="*80)
         
-        omega_set = self.generate_omega_set()
-        print(f"\n✓ Generated {self.n_resamples} frequency sets\n")
+        # Load checkpoint if available
+        progress, omega_set = None, None
+        if not restart:
+            progress, omega_set = self.load_checkpoint()
         
-        for species_name, species_idx in SPECIES_INDICES.items():
+        if progress is not None:
+            print(f"\n✓ RESUMING from checkpoint (last saved: {progress.get('timestamp', 'unknown')})\n")
+            self.omega_set = omega_set
+            completed_species_timepoints = set(progress.get('completed', []))
+        else:
+            print("\n✓ Starting fresh analysis...\n")
+            self.omega_set = self.generate_omega_set()
+            completed_species_timepoints = set()
+            print(f"✓ Generated {self.n_resamples} frequency sets\n")
+        
+        species_list = list(SPECIES_INDICES.items())
+        
+        for species_name, species_idx in species_list:
             print(f"{'='*80}")
             print(f"ANALYZING: {species_name} (Species Index {species_idx})")
             print(f"{'='*80}")
             
-            self.results[species_name] = {}
+            if species_name not in self.results:
+                self.results[species_name] = {}
             
             for t_idx, t_point in enumerate(TIME_POINTS):
+                checkpoint_key = f"{species_name}_{t_point}"
+                
+                # Skip if already completed
+                if checkpoint_key in completed_species_timepoints:
+                    print(f"  ✓ Time = {t_point} days - ALREADY COMPLETED (skipping)")
+                    continue
+                
                 print(f"\n  Time = {t_point} days ({t_idx+1}/{len(TIME_POINTS)})")
                 print(f"  Parallelizing across {N_PARAMS} parameters on {N_CORES} cores...")
                 
                 # Create partial function with fixed arguments
                 worker_fn = functools.partial(
                     analyze_parameter_worker,
-                    omega_set=omega_set,
+                    omega_set=self.omega_set,
                     t_point=t_point,
                     species_idx=species_idx,
                     n_samples=self.n_samples
@@ -429,12 +527,32 @@ class ParalleleFASTAnalyzer(eFASTAnalyzer):
                 print(f"  ✓ Found {n_sig} significant parameters (p < 0.05)")
                 if sig_S1:
                     print(f"    Mean S1 for significant params: {mean_S1:.4f}")
+                
+                # Save checkpoint after each timepoint
+                completed_species_timepoints.add(checkpoint_key)
+                progress_data = {
+                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'completed': list(completed_species_timepoints),
+                    'total': len(species_list) * len(TIME_POINTS),
+                    'completed_count': len(completed_species_timepoints)
+                }
+                self.save_checkpoint(progress_data)
 
 def main():
-    analyzer = ParalleleFASTAnalyzer(n_samples=N_SAMPLES, n_resamples=N_RESAMPLES)
+    import sys
     
-    # Run full sensitivity analysis with parallelization
-    analyzer.run_analysis()
+    # Check if user wants to restart from scratch
+    restart = '--restart' in sys.argv or '-r' in sys.argv
+    
+    if restart:
+        print("\n⚠ --restart flag detected. Clearing old checkpoints...\n")
+        analyzer = ParalleleFASTAnalyzer(n_samples=N_SAMPLES, n_resamples=N_RESAMPLES)
+        analyzer.clear_checkpoints()
+    else:
+        analyzer = ParalleleFASTAnalyzer(n_samples=N_SAMPLES, n_resamples=N_RESAMPLES)
+    
+    # Run full sensitivity analysis with checkpointing
+    analyzer.run_analysis(restart=restart)
     
     # Filter significant parameters
     filtered = analyzer.filter_results(p_threshold=0.05)
