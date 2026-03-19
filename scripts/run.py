@@ -12,7 +12,7 @@ def run_default(T='equil'):
     ic = get_default_ic()
     return run_simulation(ic, params, t_final=T) 
 
-def run_modified(param_keys, param_values, t_final=10000): # Accept parameter names or indices
+def run_modified(param_keys, param_values, t_final=800): # Accept parameter names or indices
     params = get_params()
     for key, val in zip(param_keys, param_values): # Convert names to indices if needed
         idx = get_param_index(key)
